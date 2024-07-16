@@ -39,6 +39,22 @@ class classificationModel(pl.LightningModule):
 """ LVO-affected brain hemisphere detection. SAGITTAL projection """
 ########################################################################################################################
 """ UTILS """
+class conv_block_3d(nn.Module):
+    def __init__(self, in_channels, out_channels, dilation_rate=1, padding=1):
+        super(conv_block_3d, self).__init__()
+        self.conv = nn.Sequential(
+            nn.Conv3d(in_channels, out_channels, kernel_size=3, stride=1, padding=padding, dilation=dilation_rate),
+            nn.BatchNorm3d(out_channels),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv3d(out_channels, out_channels, kernel_size=3, stride=1, padding=padding, dilation=dilation_rate),
+            nn.BatchNorm3d(out_channels),
+            nn.LeakyReLU(inplace=True)
+        )
+        
+    def forward(self, x):
+        x = self.conv(x)    
+        
+        return x
 class conv_block_3d_anisotropic(nn.Module):
     def __init__(self, in_channels, out_channels, dilation_rate=1, padding=0, kernel_size=(3,1,1)):
         super(conv_block_3d_anisotropic, self).__init__()
@@ -71,13 +87,153 @@ class encoder3D_anisotropicKernels(pl.LightningModule):
         """ Encoding path """
         x1 = self.Conv1(x) 
         x2 = self.Maxpool(x1) 
-
         x2 = self.Conv2(x2) 
         x3 = self.Maxpool(x2)
-
         x3 = self.Conv3(x3)
 
         return x3 
+
+class encoder3D_isotropicKernels(pl.LightningModule):
+    def __init__(self, input_channels, output_channels):
+        super(encoder3D_isotropicKernels, self).__init__()
+
+        self.Maxpool = nn.MaxPool3d(kernel_size=(3,3,3))
+
+        self.Conv1 = conv_block_3d(in_channels=input_channels, out_channels=output_channels[0])
+        self.Conv2 = conv_block_3d(in_channels=output_channels[0], out_channels=output_channels[1])
+        self.Conv3 = conv_block_3d(in_channels=output_channels[1], out_channels=output_channels[2])
+        
+    def forward(self, x):
+        
+        """ Encoding path """
+        x1 = self.Conv1(x)
+        x2 = self.Maxpool(x1) 
+        x2 = self.Conv2(x2) 
+        x3 = self.Maxpool(x2)
+        x3 = self.Conv3(x3) 
+
+        return x1, x2, x3 
+
+class PLM(nn.Module):
+    def __init__(self, poolingsize, in_channels, channels):
+        super().__init__()
+        self.plm = nn.Sequential(   
+            nn.Conv3d(in_channels, channels, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool3d(kernel_size=[poolingsize, 1, 1])
+        )
+
+    def forward(self, x):
+        return self.plm(x)
+   
+class OutConv2d(nn.Module):
+    def __init__(self, channels,n_class):
+        super().__init__()
+        self.out_conv = nn.Sequential(
+            nn.Conv2d(channels, n_class, kernel_size=3, padding=1)
+        )
+
+    def forward(self, x):
+        return self.out_conv(x)
+
+class vggNet(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1, padding=2):
+        super(vggNet, self).__init__()
+        self.conv1 = nn.Sequential(
+            nn.Conv3d(in_channels, out_channels, kernel_size=3, stride=stride, padding=padding),
+            nn.BatchNorm3d(out_channels),
+            nn.LeakyReLU(inplace=True)
+        )
+
+        self.conv2 = nn.Sequential(
+            nn.Conv3d(out_channels, out_channels, kernel_size=3, stride=stride, padding=padding),
+            nn.BatchNorm3d(out_channels),
+            nn.LeakyReLU(inplace=True)
+        )
+
+        self.conv3 = nn.Sequential(
+            nn.Conv3d(out_channels, out_channels, kernel_size=3, stride=stride, padding=padding),
+            nn.BatchNorm3d(out_channels),
+            nn.LeakyReLU(inplace=True)
+        )
+    
+        self.maxPooling = nn.MaxPool3d(kernel_size=2, stride=2, padding=0
+        )
+
+    def forward(self, x):
+        x1 = self.conv1(x)
+        x2 = self.conv2(x1)
+        x3 = self.conv3(x2)
+        xMp = self.maxPooling(x3)
+
+        return xMp
+
+class encoder_3VGG(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1, padding=2):
+        super(encoder_3VGG, self).__init__()
+        self.encoder_first = vggNet(in_channels, out_channels, stride=stride, padding=padding)
+        self.encoder1 = vggNet(out_channels, out_channels, stride=stride, padding=padding)
+        self.encoder2 = vggNet(out_channels, out_channels, stride=stride, padding=padding)
+
+    def forward(self, x):
+        x = self.encoder_first(x) 
+        x = self.encoder1(x)
+        x = self.encoder2(x)
+
+        return x
+
+class encoder_x_xFlip(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1, padding='same'):
+        super(encoder_x_xFlip, self).__init__()
+        self.encoder = encoder_3VGG(in_channels, out_channels, stride=stride, padding=padding)
+
+    def forward(self, x, xFlip):
+        x1 = self.encoder(x)
+        x2 = self.encoder(xFlip)
+
+        return x1, x2
+
+class encoder_2VGG(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1, padding=2):
+        super(encoder_2VGG, self).__init__()
+        self.encoder_first = vggNet(in_channels, out_channels, stride=stride, padding=padding)
+        self.encoder = vggNet(out_channels, out_channels, stride=stride, padding=padding)
+
+    def forward(self, x):
+        x = self.encoder_first(x) 
+        x = self.encoder(x)
+
+        return x
+
+class merge_process_with_skip_connection_parallel_gavp_two_more_linear(nn.Module):
+    def __init__(self, in_channels, out_channels, n_classes, padding=2, depth_processing=2):
+        super(merge_process_with_skip_connection_parallel_gavp_two_more_linear, self).__init__()
+        self.encoder = encoder_2VGG(in_channels*2, out_channels, stride=1, padding=padding)
+
+        self.ap_x = nn.AvgPool3d(kernel_size=(9,22,16))
+        self.ap_flip = nn.AvgPool3d(kernel_size=(9,22,16))
+        
+        self.ap3 = nn.AvgPool3d(kernel_size=(2,5,4))
+        self.lin1 = nn.Linear(in_features=24*3, out_features=24*2)
+        self.lin2 = nn.Linear(in_features=24*2, out_features=24)
+        self.lin3 = nn.Linear(in_features=24, out_features=n_classes)
+
+    def forward(self, x, x_flip, x_to_concatenate):
+        ap_x = (self.ap_x(x))
+        ap_flip = self.ap_flip(x_flip)
+        merged_layer = torch.abs(x - x_flip) 
+        merged_layer = torch.cat([x_to_concatenate,merged_layer],dim=1)
+        encoding = self.encoder(merged_layer)
+        gavp = self.ap3(encoding)
+
+        gavp_concat = torch.cat([gavp, ap_x, ap_flip],dim=1)
+        gavp_flat = torch.flatten(gavp_concat,start_dim=1)
+        dense1 = self.lin1(gavp_flat)
+        dense2 = self.lin2(dense1)
+        dense3 = self.lin3(dense2)
+
+        return dense3
+    
 
 """ 3D to 2D """
 # L3P + 2D CNN (single CB2D)
@@ -97,7 +253,6 @@ class L3P_2D_CNN_sagittal(pl.LightningModule):
         self.conv = nn.Conv2d(num_channels[2], num_channels[2], kernel_size=3, stride=1, padding=1)
         self.relu = nn.ReLU()
         self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
-
         self.ap = nn.AdaptiveAvgPool2d(output_size=1)
 
         self.fc = nn.Linear(num_channels[2], n_classes)
@@ -118,6 +273,196 @@ class L3P_2D_CNN_sagittal(pl.LightningModule):
         x_clf = self.fc(x_ap)
 
         return x_clf, x_amp
+
+# L3P-isotropic + 2D CNN (single CB2D)
+class L3P_isotropic_2D_CNN_sagittal(pl.LightningModule):
+
+    def __init__(self,
+                 input_channels= 1,
+                 num_channels=[8,16,32],
+                 n_classes=1):
+
+        super(L3P_isotropic_2D_CNN_sagittal, self).__init__()
+
+        self.encoder3D_isotropicKernels = encoder3D_isotropicKernels(input_channels=input_channels, output_channels=[num_channels[0], num_channels[1], num_channels[2]])
+
+        self.anisotropicMaxpool_x = nn.MaxPool3d(kernel_size=(16,1,1),stride=(16,1,1))
+        self.anisotropicMaxpool_y = nn.MaxPool3d(kernel_size=(1,20,1),stride=(1,20,1))
+        self.anisotropicMaxpool_z = nn.MaxPool3d(kernel_size=(1,1,14),stride=(1,1,14))
+
+        self.seq_x = nn.Sequential(
+            nn.Conv2d(num_channels[2], num_channels[2], kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.AdaptiveAvgPool2d(output_size=1)
+        )
+
+        self.fc = nn.Linear(num_channels[2], n_classes)
+
+    def forward(self, x):
+        xOriginal = torch.unsqueeze(x[:,0,0,...],1) 
+
+        # 3D encoder isotropic
+        x = self.encoder3D_isotropicKernels(xOriginal)  
+
+        # F_UMP_final in "W" (sagittal)
+        x_amp = self.anisotropicMaxpool_x(x)
+        x_amp = torch.squeeze(x_amp,-3) 
+
+        # 2D CNN (single CB2D)
+        x_after_cnn = torch.squeeze(self.seq_x(x_amp))
+        x_clf = self.fc(x_after_cnn)
+
+        return x_clf, x_amp
+
+# PLM-based model
+class PLM_based(nn.Module):
+    def __init__(self, in_channels, channels=[32,64,128], n_classes=1):
+        super(PLM_based, self).__init__()
+        
+        self.PLM1 = PLM(5, in_channels, channels[0])
+        self.PLM2 = PLM(4, channels[0], channels[1])
+        self.PLM3 = PLM(4, channels[1], channels[2])
+
+        self.conv1 = OutConv2d(channels[2],channels[1])
+        self.relu = nn.ReLU()
+        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        self.conv2 = OutConv2d(channels[1],channels[0])
+
+        self.ap = nn.AdaptiveAvgPool2d(output_size=1)
+        self.fc = nn.Linear(channels[0], n_classes)
+
+    def forward(self, x):
+        x = torch.unsqueeze(x[:,0,0,...],1) 
+
+        # Three PLM modules
+        x = self.PLM1(x)
+        x = self.PLM2(x) 
+        feature = self.PLM3(x) 
+
+        # 2D CNN
+        feature = torch.squeeze(feature, -3) 
+        conv1 = self.maxpool(self.relu(self.conv1(feature))) 
+        conv2 = self.conv2(conv1) 
+        
+        x_ap = torch.squeeze(self.ap(conv2)) 
+        x_clf = self.fc(x_ap)
+
+        return x_clf, feature
+
+
+""" 2D """
+# 2D CNN (single CB2D)
+class CNN_2D_single_CB2D(pl.LightningModule):
+
+    def __init__(self,
+                 input_channels=1,
+                 conv_filters=32,
+                 n_classes=1):
+
+        super(CNN_2D_single_CB2D, self).__init__()
+
+        self.conv = nn.Conv2d(input_channels, conv_filters, kernel_size=3, stride=1, padding=1)
+        self.relu = nn.ReLU()
+        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        self.ap = nn.AdaptiveAvgPool2d(output_size=1)
+
+        self.fc = nn.Linear(conv_filters, n_classes)
+
+    def forward(self, x):
+        xOriginal = torch.unsqueeze(x[:,0,0,...],1)
+
+        # Single CB2D
+        x_after_cnn = self.maxpool(self.relu(self.conv(xOriginal)))
+
+        # Global Average Pooling 
+        x_ap = torch.squeeze(self.ap(x_after_cnn))
+
+        # Fully connected layer
+        x_clf = self.fc(x_ap) 
+
+        return x_clf
+
+# 2D CNN (three CB2D)
+class CNN_2D_three_CB2D(pl.LightningModule):
+
+    def __init__(self,
+                 input_channels=1,
+                 conv_filters=32,
+                 n_classes=1):
+        super(CNN_2D_three_CB2D, self).__init__()
+
+        self.conv1 = nn.Conv2d(input_channels, conv_filters, kernel_size=3, stride=1, padding=1)
+        self.relu = nn.ReLU()
+        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        self.conv2 = nn.Conv2d(conv_filters, conv_filters, kernel_size=3, stride=1, padding=1)
+        self.relu2 = nn.ReLU()
+        self.maxpool2 = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        self.conv3 = nn.Conv2d(conv_filters, conv_filters, kernel_size=3, stride=1, padding=1)
+        self.relu3 = nn.ReLU()
+
+        self.ap = nn.AdaptiveAvgPool2d(output_size=1)
+
+        self.fc = nn.Linear(conv_filters, n_classes)
+
+
+    def forward(self, x):
+        xOriginal = torch.unsqueeze(x[:,0,0,...],1)
+
+        # 1st CB2D
+        x = self.conv1(xOriginal)
+        x = self.relu(x)
+        x = self.maxpool(x)
+ 
+        # 2nd CB2D
+        x = self.conv2(x)
+        x = self.relu2(x)
+        x = self.maxpool2(x)
+
+        # 3rd CB2D
+        x = self.conv3(x)
+        x = self.relu3(x)
+
+        xap = self.ap(x)
+        xap = xap.view(xap.size(0), -1)
+
+        x_clf = self.fc(xap)
+
+        return x_clf, None
+
+
+""" 3D """
+# DeepSymNet-v3-based model
+class DeepSymNetv3_with_skip_connection_parallel_gavp_two_more_linear(pl.LightningModule):
+    def __init__(self, 
+                 input_channels=1, 
+                 n_filters_vgg=24, 
+                 number_classes=1):
+        
+        super(DeepSymNetv3_with_skip_connection_parallel_gavp_two_more_linear, self).__init__()
+        
+       
+        self.encoder = encoder_x_xFlip(input_channels, out_channels=n_filters_vgg, stride=1, padding=1)
+        self.merge_proc = merge_process_with_skip_connection_parallel_gavp_two_more_linear(in_channels=n_filters_vgg, out_channels=n_filters_vgg, n_classes=number_classes, padding=1, depth_processing=2)
+        
+
+    def forward(self, x): 
+        # Original and flipped inputs
+        xOriginal = torch.unsqueeze(x[:,0,0,...],1)
+        xFlip = torch.unsqueeze(x[:,0,1,...],1)        
+ 
+        # Encoding path 
+        xEnc, xFlipEnc = self.encoder(xOriginal, xFlip) 
+        xMerged = self.merge_proc(xEnc, xFlipEnc, xEnc)
+
+        return xMerged, None
+
+
+
 
 
 ########################################################################################################################
@@ -141,7 +486,6 @@ class conv_block_3d(nn.Module):
         
         return x
     
-
 class encoder3D_isotropicKernels_with_symmetry(pl.LightningModule):
     def __init__(self, input_channels, output_channels):
         super(encoder3D_isotropicKernels_with_symmetry, self).__init__()
@@ -176,7 +520,6 @@ class encoder3D_isotropicKernels_with_symmetry(pl.LightningModule):
 
 
         return torch.abs(x1 - x1_flipped), torch.abs(x2 - x2_flipped), torch.abs(x3 - x3_flipped) 
-
 
 
 """ 3D to 2D """
@@ -218,3 +561,28 @@ class L3P_isotropic_with_symmetry_2D_CNN_axial(pl.LightningModule):
         x_clf = self.fc(x_ap)
 
         return x_clf, x_amp
+
+# L3P + 2D CNN (single CB2D)
+
+# L3P with symmetry + 2D CNN (single CB2D)
+
+# L3P-isotropic + 2D CNN (single CB2D)
+
+
+""" 2D """
+# 2D CNN (seven CB2D)
+
+""" 3D """
+# DeepSymNet-v3-based model
+
+""" 3D to 2.5D """
+# 3-views L3P-isotropic + 2D CNN (single CB2D)
+
+# 3-views L3P-isotropic with symmetry + 2D CNN (single CB2D)
+
+""" 2.5D """
+# 3-views 2D MIP + 2D CNN (single CB2D)
+
+# 3-views 2D MIP + 2D CNN (three CB2D)
+
+# 3-views 2D MIP + 2D CNN (seven CB2D)
