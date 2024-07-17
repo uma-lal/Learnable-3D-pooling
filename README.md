@@ -12,7 +12,7 @@ Ubuntu 22.04.4 LTS, python 3.9, pytorch 1.13.1, pytorch-lightning 2.0.2, matplot
 
 In *models/models.py*, there is the code for all the models used in the paper, including L3P-based models, PLM-based models [1], 2D and 2.5D models and 3D models.
 
-In *models/pretrained weights/*, there are the pretrained weights for the best performing model for the LVO-affected hemisphere detection task (*L**VO-hemisphere-L3P_2D_CNN_sagittal.ckpt*) and for the best performing model for the LVO detection task (*L**VO-presence-L3P_isotropic_with_symmetry_2D_CNN.ckpt*).
+In *models/pretrained weights/*, there are the pretrained weights for the best performing model for the LVO-affected hemisphere detection task (*LVO-hemisphere-L3P_2D_CNN_sagittal.ckpt*) and for the best performing model for the LVO detection task (*LVO-presence-L3P_isotropic_with_symmetry_2D_CNN.ckpt*).
 
 ## Inference
 
