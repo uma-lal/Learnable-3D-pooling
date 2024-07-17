@@ -7,3 +7,17 @@ In this work, we introduce learnable 3D pooling (L3P), a convolutional neural ne
 ## Requirements
 
 Ubuntu 22.04.4 LTS, python 3.9, pytorch 1.13.1, pytorch-lightning 2.0.2, matplotlib 3.7.1, monai 1.1.0, nibabel 5.1.0, numpy 1.23.5.
+
+## Models
+
+In *models/models.py*, there is the code for all the models used in the paper, including L3P-based models, PLM-based models, 2D and 2.5D models and 3D models.
+
+In *models/pretrained weights/*, there are the pretrained weights for the best performing model for the LVO-affected hemisphere detection task (L*VO-hemisphere-L3P_2D_CNN_sagittal.ckpt*) and for the best performing model for the LVO detection task (L*VO-presence-L3P_isotropic_with_symmetry_2D_CNN.ckpt*).
+
+## Inference
+
+An example of how to obtain the predictions for the two tasks and visualize the L3P 2D output from 3 example images, run the *inference.ipynb* notebok.
+
+## References
+
+[1] Mingchao Li, Yerui Chen, Zexuan Ji, Keren Xie, Songtao Yuan, Qiang, Chen, and Shuo Li,“Image projection network: 3d to 2d image segmentation in octa images,” *IEEE Transactions on Medical Imaging*, vol. 39, no. 11, pp. 3343–3354, 2020
