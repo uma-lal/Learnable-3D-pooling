@@ -4,8 +4,6 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-import torchmetrics
-from monai.inferers import SimpleInferer
 
 
 class classificationModel(pl.LightningModule):
